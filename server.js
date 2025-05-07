@@ -5,7 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import ImageModel from "./model_mon/usermodel.js"
-const axios = require("axios");
+import  axios from 'axios';
 
 
 const PORT=process.env.PORT||4000;
@@ -21,7 +21,7 @@ async function detectAccident(imagePath) {
           method: "POST",
           url: "https://serverless.roboflow.com/accident-classification-jbmo5/7",
           params: {
-              api_key: "aJt5Rf8jqIl07h50AJ02"
+              api_key: process.env.MODEL_API,
           },
           data: image,
           headers: {
