@@ -1,97 +1,44 @@
 import dotenv from 'dotenv';
 import express from 'express';
-import mongoose from 'mongoose';
 import connectToMongoDB from './database/connectdb.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import ImageModel from "./model_mon/usermodel.js"
-import ort from 'onnxruntime-node';
-import sharp from 'sharp';
+const axios = require("axios");
 
 
- const PORT=process.env.PORT||4000;
- dotenv.config(); 
+const PORT=process.env.PORT||4000;
+dotenv.config(); 
 const app=express();
 
-async function preprocessImage(imagePath) {
-  const imageBuffer = await sharp(imagePath)
-      .resize(640, 640)
-      .toBuffer();
+async function detectAccident(imagePath) {
+  try {
+      const absolutePath = path.resolve(imagePath);
+      const image = fs.readFileSync(absolutePath, { encoding: "base64" });
 
-  const image = await sharp(imageBuffer).raw().toBuffer({ resolveWithObject: true });
+      const response = await axios({
+          method: "POST",
+          url: "https://serverless.roboflow.com/accident-classification-jbmo5/7",
+          params: {
+              api_key: "aJt5Rf8jqIl07h50AJ02"
+          },
+          data: image,
+          headers: {
+              "Content-Type": "application/x-www-form-urlencoded"
+          }
+      });
 
-  const pixels = new Float32Array(3 * 640 * 640);
-  let idx = 0;
-
-  for (let i = 0; i < image.data.length; i += 3) {
-      const red = image.data[i] / 255.0;
-      const green = image.data[i + 1] / 255.0;
-      const blue = image.data[i + 2] / 255.0;
-
-      pixels[idx] = red;
-      pixels[idx + 1] = green;
-      pixels[idx + 2] = blue;
-      idx += 3;
-  }
-
-  return pixels;
-}
-
-async function isAccidentDetected(imagePath,title, tags,lat ,long) {
-  const confidenceThreshold=0.5
-  const pixels = await preprocessImage(imagePath);
-
-    const session = await ort.InferenceSession.create('best_yolov8_model.onnx');
-    const inputTensor = new ort.Tensor('float32', pixels, [1, 3, 640, 640]);
-
-    const results = await session.run({ images: inputTensor });
-
-    // Log the results to understand the structure
-    console.log("Inference results:", results);
-
-    // Assuming 'output0' is the actual key, adjust if needed
-    const output = results['output0'];
-    console.log('Model output:', output);
-
-    // Now, let's extract bounding boxes, confidences, and class labels from the flattened output tensor
-    const numClasses = 5; // Number of classes detected by YOLO
-    const gridSize = 8400; // This matches the 8400 cells in the tensor
-    const boxes = [];
-    const confidences = [];
-    const classIds = [];
-    const outputData = output.data;
-
-    // This logic assumes the tensor is structured as [1, numClasses, gridSize]
-    for (let i = 0; i < gridSize; i++) {
-        const confidence = output[i * numClasses + 0];  // Confidence score (index 0 for class detection)
-        const classId = Math.floor(output[i * numClasses + 1]); // Class ID (index 1 for class prediction)
- // Extracting the bounding box (4 coordinates per box)
-        const box = outputData.slice(i * 4, (i + 1) * 4); 
-        // Optional: You can extract coordinates if needed (using box[0], box[1], etc.)
-        if (confidence > confidenceThreshold) {
-            boxes.push(box);
-            confidences.push(confidence);
-            classIds.push(classId);
-        }
-    }
-
-    // Assuming the label for 'Accident' is 0 (you need to adjust based on your labels)
-    const classNames = ['Accident', 'OtherClass1', 'OtherClass2', 'OtherClass3', 'OtherClass4'];
-
-    for (let i = 0; i < boxes.length; i++) {
-        const className = classNames[classIds[i]];
-        const confidence = confidences[i];1
-
-      if (className.toLowerCase() === 'accident' && confidence < confidenceThreshold) {
-          console.log(`🚨 Accident Detected! Confidence: ${confidence.toFixed(2)}`);
-          await insertLocalData(title,imagePath,tags,lat,long)
-          return true;
+      const topPrediction = response.data?.predictions?.[0];
+      if (!topPrediction) {
+          throw new Error("No prediction found in response.");
       }
-  }
 
-  console.log("✅ No Accident Detected");
-  return false;
+      return topPrediction.class === "accident";
+  } catch (error) {
+      console.error("Error during accident detection:", error.message);
+      return false;
+  }
 }
 
 
@@ -138,9 +85,19 @@ if (!fs.existsSync('uploads')) {
 app.post('/upload', upload.single('image'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    
-    await insertLocalData(req.body.title,`./uploads/${req.file.filename}`,req.body.tags,req.body.lat,req.body.long)
-    // isAccidentDetected(`./uploads/${req.file.filename}`,req.body.title,req.body.tags,req.body.lat, req.body.long)
+    try {
+      if (await detectAccident(`./uploads/${req.file.filename}`)) {
+          await insertLocalData(
+              req.body.title,
+              `./uploads/${req.file.filename}`,
+              req.body.tags,
+              req.body.lat,
+              req.body.long
+          );
+      }
+  } catch (err) {
+      console.error("Error inserting data:", err);
+  }
 
     res.json({
       message: 'File uploaded successfully',
