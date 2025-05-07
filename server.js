@@ -33,7 +33,7 @@ async function detectAccident(imagePath) {
       if (!topPrediction) {
           throw new Error("No prediction found in response.");
       }
-
+      console.log(response.data);
       return topPrediction.class === "accident";
   } catch (error) {
       console.error("Error during accident detection:", error.message);
