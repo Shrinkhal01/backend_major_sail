@@ -31,6 +31,7 @@ async function detectAccident(imagePath) {
 
       const topPrediction = response.data?.predictions?.[0];
       if (!topPrediction) {
+          console.log("No pridiction");
           throw new Error("No prediction found in response.");
       }
       console.log(response.data);
